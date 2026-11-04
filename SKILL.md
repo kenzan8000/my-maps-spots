@@ -72,8 +72,12 @@ strongly recommend them.
 
 ## Step 2: Find first-hand sources
 
-Search in **both** the user's language and the local language. Use several phrasings,
-for example (adapt the local-language ones, these are Finnish examples for Helsinki):
+Search in **both** the user's language and the local language. When neither of them is
+English, also search in **English**, since English usually has more first-hand posts
+and detail than the user's language (for example, a Japanese reader searching for
+Helsinki finds more in English than in Japanese). Use several phrasings, for example (the
+phrasings below are in English; translate them for the other languages, and adapt the
+local-language ones, these are Finnish examples for Helsinki):
 
 - `"<place>" travel blog`, `"<place>" trip report`, `"<place>" itinerary blog`
 - `"<place>" local's guide`, `"<place>" hidden gems blog`, `living in <place> favourite places`
