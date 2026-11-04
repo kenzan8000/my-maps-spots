@@ -1,0 +1,88 @@
+{
+  "place": {
+    "query": "Helsinki, Finland",
+    "slug": "helsinki",
+    "user_language": "en",
+    "local_language": "fi"
+  },
+  "spots": [
+    {
+      "id": "suomenlinna",
+      "name": "Suomenlinna (Sveaborg / Fortress of Finland)",
+      "local_name": "Suomenlinna",
+      "category": "Sights",
+      "description": "An 18th-century sea fortress built across six islands at the mouth of Helsinki's harbour, begun under Swedish rule in 1748 and a UNESCO World Heritage Site since 1991. Around 800 people still live there year-round. Bloggers suggest taking the regular public HSL ferry from Market Square and packing a picnic for the southern ramparts.",
+      "local_terms": [
+        {"term": "Suomenlinna", "meaning": "Castle of Finland", "pronunciation": "SUO-men-lin-na"},
+        {"term": "lautta", "meaning": "ferry"}
+      ],
+      "search_query": "Suomenlinna, Helsinki",
+      "wikidata": "Q1292442",
+      "sources": ["https://example.com/sample-traveller-blog/helsinki-weekend"]
+    },
+    {
+      "id": "oodi",
+      "name": "Oodi (Helsinki Central Library)",
+      "local_name": "Helsingin keskustakirjasto Oodi",
+      "category": "Architecture",
+      "description": "Helsinki's central library, opened in December 2018 to mark the centenary of Finnish independence, with a wave-shaped spruce facade designed by ALA Architects. Besides books it lends out sewing machines, 3D printers and recording studios. Locals recommend the top-floor 'book heaven' and its terrace facing the Parliament House.",
+      "local_terms": [
+        {"term": "kirjasto", "meaning": "library", "pronunciation": "KEER-yas-to"},
+        {"term": "oodi", "meaning": "ode"}
+      ],
+      "search_query": "Oodi library, Helsinki",
+      "address": "Töölönlahdenkatu 4, 00100 Helsinki",
+      "sources": [
+        "https://example.com/sample-local-blog/my-favourite-helsinki",
+        "https://example.com/sample-traveller-blog/helsinki-weekend"
+      ]
+    },
+    {
+      "id": "temppeliaukio",
+      "name": "Temppeliaukion kirkko (Rock Church)",
+      "local_name": "Temppeliaukion kirkko",
+      "category": "Sights",
+      "description": "A Lutheran church carved directly into solid granite, completed in 1969 by architects Timo and Tuomo Suomalainen. A copper dome and a ring of skylights let daylight in along the rock walls. Bloggers recommend going early to avoid tour groups and checking for concerts, as the acoustics are excellent.",
+      "local_terms": [
+        {"term": "kirkko", "meaning": "church", "pronunciation": "KEERK-ko"},
+        {"term": "temppeliaukio", "meaning": "temple square"}
+      ],
+      "search_query": "Temppeliaukion kirkko, Helsinki",
+      "address": "Lutherinkatu 3, 00100 Helsinki",
+      "wikidata": "Q1132809",
+      "website": "https://www.temppeliaukionkirkko.fi/",
+      "website_confirmed_official": true,
+      "sources": ["https://example.com/sample-local-blog/my-favourite-helsinki"]
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://example.com/sample-traveller-blog/helsinki-weekend",
+      "title": "Sample: A slow weekend in Helsinki",
+      "author": "Sample traveller",
+      "date": "2025-06-14",
+      "language": "en",
+      "kind": "traveller blog",
+      "status": "used",
+      "reason": "Illustrative entry: first-person trip report with own photos",
+      "spots": ["suomenlinna", "oodi"]
+    },
+    {
+      "url": "https://example.com/sample-local-blog/my-favourite-helsinki",
+      "title": "Sample: Lempipaikkani Helsingissä",
+      "author": "Sample local",
+      "date": "2024-09-02",
+      "language": "fi",
+      "kind": "resident blog",
+      "status": "used",
+      "reason": "Illustrative entry: written by a long-time resident",
+      "spots": ["oodi", "temppeliaukio"]
+    },
+    {
+      "url": "https://example.com/sample-aggregator/top-50-helsinki",
+      "title": "Sample: Top 50 things to do in Helsinki",
+      "status": "rejected",
+      "reason": "Illustrative entry: SEO listicle, no author, no first-hand detail"
+    }
+  ]
+}
