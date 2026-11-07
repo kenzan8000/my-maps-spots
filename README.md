@@ -14,11 +14,18 @@ Each pin has:
 | Name | Local name, with your language's name in brackets, e.g. `Temppeliaukion kirkko (Rock Church)` |
 | Local name | Local name only, to show to locals |
 | Category | Layer name (Sights, Food & Drink, Nature, ...) |
+| Area | Neighbourhood or district the spot lies in, as in the chat list |
 | Description | Background, history and the bloggers' tips in your language, followed by useful local terms |
 | Latitude, Longitude | Verified coordinates, 6 decimal places |
 | Google Maps URL | Only when Google confirmed the place exists, never guessed |
 | Website | Only a confirmed official website |
 | Sources | The blog posts and articles that recommended the spot |
+
+The agent also shows the spots in the chat, grouped by area (neighbourhood or district,
+in a sensible order), with a photo, description, local terms and numbered source links
+for each spot, followed by the list of sources used and rejected. The layout is made for
+a phone screen, with no wide tables. Photos come from the spot's official site, Wikimedia
+Commons or a source post, and are checked to embed from another site.
 
 ## What's in here
 
@@ -27,11 +34,12 @@ my-maps-spots/
   SKILL.md                     the skill: workflow and rules for the agent
   scripts/verify_places.py     checks coordinates, Google Maps links, websites
   scripts/build_mymaps_csv.py  writes the My Maps CSVs and the sources list
+  scripts/render_spots.py      checks photos, prints the area-grouped list as Markdown
   examples/helsinki-spots.json sample input with three Helsinki spots
   .env.example                 where to put the optional API key
 ```
 
-Both scripts need only Python 3.9 or newer, with no extra packages. Agents that cannot
+All three scripts need only Python 3.9 or newer, with no extra packages. Agents that cannot
 run scripts can follow the manual steps written into `SKILL.md`.
 
 ## Install
@@ -99,6 +107,7 @@ mkdir -p output/helsinki
 cp examples/helsinki-spots.json output/helsinki/spots.json
 python3 scripts/verify_places.py output/helsinki/spots.json
 python3 scripts/build_mymaps_csv.py output/helsinki/verified.json
+python3 scripts/render_spots.py output/helsinki/verified.json -o output/helsinki/spots.md
 ```
 
 Output in `output/helsinki/`:
@@ -107,12 +116,29 @@ Output in `output/helsinki/`:
 - `helsinki-<category>.csv`: one file per category, for one layer each
 - `sources.md`, `sources.csv`: every source read, used or rejected, and the spots from it
 - `excluded.csv`: spots that could not be verified, and why
+- `spots.md`: the area-grouped list with photos that the agent posts in the chat
 
 Useful options for `verify_places.py`:
 
+- `--check-key`: print whether a Google Maps API key is configured, then exit. Exit 0
+  if one was found, 1 if not. Does not call Google or print the key. `spots.json` is
+  not required.
 - `--mode google|osm`: force a mode (default `auto`)
 - `--margin-km 15`: how far outside the place a spot may be, for day trips
 - `--tolerance-m 150`: how close two independent sources must agree in open data mode
+
+A Google-mode run makes one extra Places request before the spots, to confirm the key
+is accepted. A rejected key stops the run there.
+
+Options for `render_spots.py`:
+
+- `-o spots.md`: write the Markdown to a file instead of stdout
+- `--no-check-images`: use the first image URL without checking it
+- `--no-proxy`: keep the original image URLs instead of GitHub image proxy URLs. Some
+  chat apps, often on mobile and web, only show images from a short list of trusted
+  hosts such as `camo.githubusercontent.com`; without the proxy, photos may not show
+  there. `GITHUB_TOKEN` or `GH_TOKEN` raises GitHub's limit of 60 requests an hour.
+- `--timeout 8`: seconds per image request
 
 The sample's blog URLs are `example.com` placeholders; real runs list the actual posts.
 

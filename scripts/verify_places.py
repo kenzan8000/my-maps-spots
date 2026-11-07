@@ -6,9 +6,15 @@ verification status per spot. Uses only the Python standard library.
 
 Modes:
   google  Google Places API (New) Text Search. Needs GOOGLE_MAPS_API_KEY.
+          One Places request confirms the key before any spot is looked up.
   osm     OpenStreetMap Nominatim, cross-checked with Wikidata or the address.
           Never produces Google Maps links.
   auto    google if a key is available, otherwise osm (default).
+
+--check-key
+    Print whether GOOGLE_MAPS_API_KEY is set and exit, without calling Google.
+    Exit status 0 means a key was found, 1 means it was not. The key itself is
+    never printed. spots.json is not required with this flag.
 """
 
 from __future__ import annotations
@@ -95,21 +101,54 @@ def http_json(url: str, *, data: dict | None = None, headers: dict | None = None
     raise FatalError(f"Giving up on {host}")
 
 
-def load_env_files(env_file: Path | None) -> None:
-    """Fill unset variables from .env files; real environment variables win."""
-    for path in [env_file, SKILL_DIR / ".env"]:
-        if not (path and path.is_file()):
+ENV_NAMES = ("GOOGLE_MAPS_API_KEY", "MY_MAPS_SPOTS_CONTACT")
+
+
+def load_env_files(env_file: Path | None) -> tuple[str, list[str]]:
+    """Fill unset variables from .env files; real environment variables win.
+
+    Looks at --env-file, then the skill folder's .env, then a .env next to this script.
+    Only the variables in ENV_NAMES are read. Returns (key_source, checked): where
+    GOOGLE_MAPS_API_KEY came from ("environment variable", a .env path, or "") and a
+    description of each place that was checked. Never includes the key itself.
+    """
+    key_source = "environment variable" if os.environ.get("GOOGLE_MAPS_API_KEY", "").strip() else ""
+    checked = [f"environment variable GOOGLE_MAPS_API_KEY: {'set' if key_source else 'not set'}"]
+    seen: set[Path] = set()
+    for path in [env_file, SKILL_DIR / ".env", Path(__file__).resolve().parent / ".env"]:
+        if path is None:
             continue
-        for line in path.read_text(encoding="utf-8").splitlines():
+        path = path.expanduser().resolve()
+        if path in seen:
+            continue
+        seen.add(path)
+        if not path.is_file():
+            checked.append(f"{path}: not found")
+            continue
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError as error:
+            checked.append(f"{path}: found but cannot be read ({error})")
+            continue
+        found = set()
+        for line in text.splitlines():
             line = line.strip()
             if line.startswith("export "):
                 line = line[len("export ") :]
             if not line or line.startswith("#") or "=" not in line:
                 continue
             name, value = line.split("=", 1)
-            value = value.strip().strip("'\"")
-            if value and not os.environ.get(name.strip()):
-                os.environ[name.strip()] = value
+            name, value = name.strip(), value.strip().strip("'\"")
+            if name in ENV_NAMES and value:
+                found.add(name)
+                if not os.environ.get(name):
+                    os.environ[name] = value
+                    if name == "GOOGLE_MAPS_API_KEY":
+                        key_source = str(path)
+        checked.append(
+            f"{path}: found, GOOGLE_MAPS_API_KEY {'is set' if 'GOOGLE_MAPS_API_KEY' in found else 'is missing or empty'}"
+        )
+    return key_source, checked
 
 
 def normalize(text: str) -> str:
@@ -188,14 +227,30 @@ def resolve_place_bbox(place: dict) -> list[float]:
     return [s, w, n, e]
 
 
+_wikidata_cache: dict[str, dict] = {}
+
+
 def wikidata_entity(qid: str) -> dict:
     qid = qid.strip().upper()
     if not re.fullmatch(r"Q\d+", qid):
         return {}
+    if qid not in _wikidata_cache:
+        _wikidata_cache[qid] = _fetch_wikidata_entity(qid)
+    return _wikidata_cache[qid]
+
+
+def _fetch_wikidata_entity(qid: str) -> dict:
     data = http_json(WIKIDATA_ENTITY_URL.format(qid=qid))
     entity = data.get("entities", {}).get(qid, {})
     claims = entity.get("claims", {})
     out: dict = {"qid": qid}
+    for claim in claims.get("P18", []):
+        if claim.get("rank") == "deprecated":
+            continue
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+        if isinstance(value, str) and value:
+            out["image"] = value
+            break
     for claim in claims.get("P625", []):
         value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
         if value:
@@ -227,6 +282,25 @@ def nominatim_search(query: str, bbox: list[float], language: str) -> list[dict]
     return http_json(f"{NOMINATIM_URL}?{urllib.parse.urlencode(params)}") or []
 
 
+def places_request(body: dict, key: str, field_mask: str) -> object:
+    headers = {"X-Goog-Api-Key": key, "X-Goog-FieldMask": field_mask}
+    try:
+        return http_json(PLACES_SEARCH_URL, data=body, headers=headers)
+    except FatalError as e:
+        msg = str(e)
+        if "HTTP 400" in msg or "HTTP 401" in msg or "HTTP 403" in msg:
+            raise FatalError(
+                "Google Places API rejected the request. Check that the key is valid "
+                "and that 'Places API (New)' is enabled for its project.\n" + msg
+            ) from e
+        raise
+
+
+def probe_places_key(key: str) -> None:
+    """One small Text Search so a rejected key fails before any spot is looked up."""
+    places_request({"textQuery": "cafe", "pageSize": 1}, key, "places.id")
+
+
 def places_search(query: str, bbox: list[float], language: str, key: str) -> list[dict]:
     south, west, north, east = bbox
     body = {
@@ -241,17 +315,7 @@ def places_search(query: str, bbox: list[float], language: str, key: str) -> lis
     }
     if language:
         body["languageCode"] = language
-    headers = {"X-Goog-Api-Key": key, "X-Goog-FieldMask": PLACES_FIELDS}
-    try:
-        data = http_json(PLACES_SEARCH_URL, data=body, headers=headers)
-    except FatalError as e:
-        msg = str(e)
-        if "HTTP 400" in msg or "HTTP 401" in msg or "HTTP 403" in msg:
-            raise FatalError(
-                "Google Places API rejected the request. Check that the key is valid "
-                "and that 'Places API (New)' is enabled for its project.\n" + msg
-            ) from e
-        raise
+    data = places_request(body, key, PLACES_FIELDS)
     return data.get("places", []) if isinstance(data, dict) else []
 
 
@@ -268,6 +332,26 @@ def pick_website(spot: dict, *candidates: tuple[str, str]) -> tuple[str, str]:
         if url:
             return url, source
     return "", ""
+
+
+def add_wikidata_image(spot: dict) -> None:
+    """Append the spot's Wikidata image (P18, hosted on Wikimedia Commons) to spot["images"].
+
+    It goes last, as a fallback behind the photos the agent found. render_spots.py checks
+    that the file really loads before using it.
+    """
+    if not spot.get("wikidata"):
+        return
+    try:
+        filename = wikidata_entity(spot["wikidata"]).get("image")
+    except FatalError:
+        return
+    if not filename:
+        return
+    url = "https://commons.wikimedia.org/wiki/Special:FilePath/" + urllib.parse.quote(filename.replace(" ", "_")) + "?width=480"
+    images = spot.setdefault("images", [])
+    if url not in images:
+        images.append(url)
 
 
 def verify_google(spot: dict, bbox: list[float], language: str, key: str) -> dict:
@@ -414,11 +498,30 @@ def verify_osm(spot: dict, bbox: list[float], language: str, tolerance_m: float)
     return v
 
 
+def report_key_check(key_source: str, checked: list[str]) -> int:
+    """Print where the key lookup looked. Never includes the key. Returns 0 if found, else 1."""
+    if key_source:
+        print(f"Google Maps API key: found in {key_source}.", file=sys.stderr)
+        code = 0
+    else:
+        print("Google Maps API key: not found.", file=sys.stderr)
+        code = 1
+    print("Checked:", file=sys.stderr)
+    for line in checked:
+        print(f"  - {line}", file=sys.stderr)
+    return code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("spots", type=Path, help="path to spots.json")
+    parser.add_argument("spots", nargs="?", type=Path, help="path to spots.json")
     parser.add_argument("-o", "--output", type=Path, help="output path (default: verified.json next to input)")
     parser.add_argument("--mode", choices=["auto", "google", "osm"], default="auto")
+    parser.add_argument(
+        "--check-key",
+        action="store_true",
+        help="print whether GOOGLE_MAPS_API_KEY is set, then exit (no Google request)",
+    )
     parser.add_argument("--env-file", type=Path, help="extra .env file to read GOOGLE_MAPS_API_KEY from")
     parser.add_argument("--tolerance-m", type=float, default=150, help="max distance between two sources (default 150)")
     parser.add_argument(
@@ -429,27 +532,52 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    key_source, checked = load_env_files(args.env_file)
+    if args.check_key:
+        return report_key_check(key_source, checked)
+    if args.spots is None:
+        parser.error("spots.json is required unless --check-key is set")
+
     data = json.loads(args.spots.read_text(encoding="utf-8"))
     place = data.get("place", {})
     spots = data.get("spots", [])
     language = place.get("user_language", "")
 
-    load_env_files(args.env_file)
     key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
     mode = args.mode
     if mode == "auto":
         mode = "google" if key else "osm"
     if mode == "google" and not key:
-        print("error: --mode google needs GOOGLE_MAPS_API_KEY", file=sys.stderr)
+        print("error: --mode google needs GOOGLE_MAPS_API_KEY. Checked:", file=sys.stderr)
+        for line in checked:
+            print(f"  - {line}", file=sys.stderr)
         return 2
-    if mode == "osm":
+    if mode == "google":
+        print(f"Google mode: using the Google Maps API key from {key_source}.", file=sys.stderr)
+    elif args.mode == "osm":
         print(
-            "Open data mode (no Google Maps API key): coordinates are checked with "
+            "Open data mode (forced with --mode osm): coordinates are checked with "
             "OpenStreetMap and Wikidata, and Google Maps links are left empty.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "Open data mode (no Google Maps API key found): coordinates are checked with "
+            "OpenStreetMap and Wikidata, and Google Maps links are left empty. Checked:",
+            file=sys.stderr,
+        )
+        for line in checked:
+            print(f"  - {line}", file=sys.stderr)
+        print(
+            "  If you expected Google mode, pass --env-file <path to the .env> or set "
+            "GOOGLE_MAPS_API_KEY, then rerun.",
             file=sys.stderr,
         )
 
     try:
+        if mode == "google":
+            probe_places_key(key)
+            print("Places API accepted the key.", file=sys.stderr)
         place_bbox = resolve_place_bbox(place)
         search_bbox = expand_bbox(place_bbox, args.margin_km)
         for i, spot in enumerate(spots, 1):
@@ -465,6 +593,8 @@ def main() -> int:
             spot["website"] = v.pop("website", "") if v["status"] == "verified" else spot.get("website", "")
             spot["website_source"] = v.pop("website_source", "")
             spot["verification"] = v
+            if v["status"] == "verified":
+                add_wikidata_image(spot)
             notes = f" ({'; '.join(v['notes'])})" if v["notes"] else ""
             print(f"[{i}/{len(spots)}] {v['status']:<11} {label}{notes}", file=sys.stderr)
     except FatalError as e:
@@ -474,6 +604,7 @@ def main() -> int:
     place["bbox"] = [round(x, 6) for x in place_bbox]
     data["verification"] = {
         "mode": mode,
+        "google_key_source": key_source if mode == "google" else "",
         "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tolerance_m": args.tolerance_m,
         "margin_km": args.margin_km,
@@ -486,7 +617,7 @@ def main() -> int:
         status = spot["verification"]["status"]
         counts[status] = counts.get(status, 0) + 1
     summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
-    print(f"Wrote {out} ({summary})", file=sys.stderr)
+    print(f"Wrote {out} ({summary}), mode: {mode}", file=sys.stderr)
     return 0
 
 

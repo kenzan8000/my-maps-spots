@@ -3,14 +3,36 @@
     "query": "Helsinki, Finland",
     "slug": "helsinki",
     "user_language": "en",
-    "local_language": "fi"
+    "local_language": "fi",
+    "areas": [
+      {
+        "id": "centre",
+        "name": "City centre",
+        "local_name": "Keskusta",
+        "summary": "The compact heart of Helsinki around the railway station, Parliament House and the harbour front."
+      },
+      {
+        "id": "toolo",
+        "name": "Töölö",
+        "local_name": "Töölö",
+        "summary": "A leafy residential district just north-west of the centre, known for its early-20th-century apartment blocks."
+      },
+      {
+        "id": "islands",
+        "name": "Islands in the harbour",
+        "local_name": "Saaret",
+        "summary": "Islands a short ferry ride from Market Square, popular with locals in summer."
+      }
+    ]
   },
+  "labels": {},
   "spots": [
     {
       "id": "suomenlinna",
       "name": "Suomenlinna (Sveaborg / Fortress of Finland)",
       "local_name": "Suomenlinna",
       "category": "Sights",
+      "area": "islands",
       "description": "An 18th-century sea fortress built across six islands at the mouth of Helsinki's harbour, begun under Swedish rule in 1748 and a UNESCO World Heritage Site since 1991. Around 800 people still live there year-round. Bloggers suggest taking the regular public HSL ferry from Market Square and packing a picnic for the southern ramparts.",
       "local_terms": [
         {"term": "Suomenlinna", "meaning": "Castle of Finland", "pronunciation": "SUO-men-lin-na"},
@@ -18,6 +40,7 @@
       ],
       "search_query": "Suomenlinna, Helsinki",
       "wikidata": "Q1292442",
+      "images": ["https://commons.wikimedia.org/wiki/Special:FilePath/Suomenlinna.jpg?width=480"],
       "sources": ["https://example.com/sample-traveller-blog/helsinki-weekend"]
     },
     {
@@ -25,6 +48,7 @@
       "name": "Oodi (Helsinki Central Library)",
       "local_name": "Helsingin keskustakirjasto Oodi",
       "category": "Architecture",
+      "area": "centre",
       "description": "Helsinki's central library, opened in December 2018 to mark the centenary of Finnish independence, with a wave-shaped spruce facade designed by ALA Architects. Besides books it lends out sewing machines, 3D printers and recording studios. Locals recommend the top-floor 'book heaven' and its terrace facing the Parliament House.",
       "local_terms": [
         {"term": "kirjasto", "meaning": "library", "pronunciation": "KEER-yas-to"},
@@ -32,6 +56,10 @@
       ],
       "search_query": "Oodi library, Helsinki",
       "address": "Töölönlahdenkatu 4, 00100 Helsinki",
+      "images": [
+        "https://example.com/missing-oodi.jpg",
+        "https://commons.wikimedia.org/wiki/Special:FilePath/Helsingin_keskustakirjasto_Oodi_2022-09-16_08.jpg?width=480"
+      ],
       "sources": [
         "https://example.com/sample-local-blog/my-favourite-helsinki",
         "https://example.com/sample-traveller-blog/helsinki-weekend"
@@ -42,6 +70,7 @@
       "name": "Temppeliaukion kirkko (Rock Church)",
       "local_name": "Temppeliaukion kirkko",
       "category": "Sights",
+      "area": "toolo",
       "description": "A Lutheran church carved directly into solid granite, completed in 1969 by architects Timo and Tuomo Suomalainen. A copper dome and a ring of skylights let daylight in along the rock walls. Bloggers recommend going early to avoid tour groups and checking for concerts, as the acoustics are excellent.",
       "local_terms": [
         {"term": "kirkko", "meaning": "church", "pronunciation": "KEERK-ko"},

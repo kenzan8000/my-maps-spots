@@ -25,6 +25,7 @@ COLUMNS = [
     "Name",
     "Local name",
     "Category",
+    "Area",
     "Description",
     "Latitude",
     "Longitude",
@@ -80,7 +81,20 @@ def local_terms_text(terms: list) -> str:
     return "; ".join(parts)
 
 
-def spot_row(spot: dict) -> dict:
+def area_name_map(place: dict) -> dict[str, str]:
+    """Map area id (and name) to the display name, from place.areas."""
+    names: dict[str, str] = {}
+    for area in place.get("areas") or []:
+        display = area.get("name") or area.get("local_name") or area.get("id") or ""
+        for key in (area.get("id"), area.get("name"), area.get("local_name")):
+            if key:
+                names[str(key).casefold()] = display
+    return names
+
+
+def spot_row(spot: dict, area_names: dict[str, str] | None = None) -> dict:
+    area = str(spot.get("area") or "").strip()
+    area = (area_names or {}).get(area.casefold(), area)
     description = (spot.get("description") or "").strip()
     terms = local_terms_text(spot.get("local_terms"))
     if terms:
@@ -89,6 +103,7 @@ def spot_row(spot: dict) -> dict:
         "Name": spot.get("name") or spot.get("local_name") or "",
         "Local name": spot.get("local_name", ""),
         "Category": spot.get("category") or "Other",
+        "Area": area,
         "Description": description,
         "Latitude": f"{float(spot['lat']):.6f}",
         "Longitude": f"{float(spot['lon']):.6f}",
@@ -174,6 +189,26 @@ def collect_sources(data: dict, spots_by_id: dict[str, dict]) -> list[dict]:
     return sources
 
 
+def select_spots(all_spots: list[dict]) -> tuple[list[dict], list[tuple[dict, str]]]:
+    """Split spots into (included, excluded with reason). Shared with render_spots.py."""
+    excluded: list[tuple[dict, str]] = []
+    candidates = []
+    for spot in all_spots:
+        v = spot.get("verification") or {}
+        if v.get("status") != "verified":
+            reason = "; ".join(v.get("notes") or []) or v.get("status", "not verified")
+            excluded.append((spot, f"{v.get('status', 'unverified')}: {reason}"))
+        elif not valid_coords(spot):
+            excluded.append((spot, "invalid coordinates"))
+        elif not spot.get("sources"):
+            excluded.append((spot, "no first-hand source listed"))
+        else:
+            candidates.append(spot)
+
+    included, duplicates = dedupe(candidates)
+    return included, excluded + duplicates
+
+
 def write_sources(out_dir: Path, place_name: str, sources: list[dict], spots: list[dict]) -> None:
     columns = ["Status", "Title", "Author", "Date", "Language", "Kind", "URL", "Reason", "Spots"]
     rows = [
@@ -241,27 +276,13 @@ def main() -> int:
         print("error: no verification data; run verify_places.py first", file=sys.stderr)
         return 1
 
-    excluded: list[tuple[dict, str]] = []
-    candidates = []
-    for spot in all_spots:
-        v = spot.get("verification") or {}
-        if v.get("status") != "verified":
-            reason = "; ".join(v.get("notes") or []) or v.get("status", "not verified")
-            excluded.append((spot, f"{v.get('status', 'unverified')}: {reason}"))
-        elif not valid_coords(spot):
-            excluded.append((spot, "invalid coordinates"))
-        elif not spot.get("sources"):
-            excluded.append((spot, "no first-hand source listed"))
-        else:
-            candidates.append(spot)
-
-    included, duplicates = dedupe(candidates)
-    excluded += duplicates
+    included, excluded = select_spots(all_spots)
 
     for old in out_dir.glob(f"{slug}-*.csv"):
         old.unlink()
 
-    rows = [spot_row(s) for s in included]
+    area_names = area_name_map(place)
+    rows = [spot_row(s, area_names) for s in included]
     written = write_layer(out_dir, f"{slug}-all", rows)
 
     categories: dict[str, list[dict]] = {}
