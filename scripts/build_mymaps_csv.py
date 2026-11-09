@@ -27,6 +27,7 @@ import math
 import re
 import sys
 import unicodedata
+import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -190,7 +191,48 @@ def _kml_tag(name: str) -> str:
 
 
 def html_escape(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    """Escape <, > and quotes. Leave & as &.
+
+    The balloon is stored in CDATA, so &amp; would be the letters amp, not an
+    ampersand. My Maps does not turn those letters back into &, and the link
+    will not open.
+    """
+    return text.replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def cdata_wrap(text: str) -> str:
+    """Literal text inside XML."""
+    parts = text.split("]]>")
+    return "<![CDATA[" + "]]]]><![CDATA[>".join(parts) + "]]>"
+
+
+def kml_maps_url(url: str) -> str:
+    """Google Maps link for a My Maps pin. It must not contain &.
+
+    On import, My Maps rewrites & to the letters amp inside the pin field, so
+    ?api=1&query=...&query_place_id=... does not open. A single place-id
+    parameter has no &.
+    """
+    if not url:
+        return url
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    place_id = (query.get("query_place_id") or [""])[0]
+    if place_id:
+        return "https://www.google.com/maps/place/?q=place_id:" + urllib.parse.quote(place_id, safe="-_")
+    if "&" not in url:
+        return url
+    return url.split("&", 1)[0]
+
+
+def kml_image_url(url: str) -> str:
+    """Photo address for a My Maps pin. Drop the query string so it has no &.
+
+    Wikimedia thumb URLs still identify the file without ?utm_source=...&...
+    """
+    if not url or "&" not in url:
+        return url
+    parsed = urllib.parse.urlparse(url)
+    return urllib.parse.urlunparse(parsed._replace(query="", fragment=""))
 
 
 def popup_html(description: str, image: str | None) -> str:
@@ -220,39 +262,59 @@ def kml_bytes(title: str, entries: list[tuple[dict, str | None]]) -> bytes:
     doc = ET.SubElement(document, _kml_tag("Document"))
     ET.SubElement(doc, _kml_tag("name")).text = title
     balloons: list[tuple[str, str]] = []
+    # ElementTree writes & as &amp;. My Maps then shows that in the link and it
+    # will not open, so URL fields are filled in as CDATA after serialization.
+    literals: list[tuple[str, str]] = []
+
+    def literal(text: str) -> str:
+        token = f"__KMLVAL_{len(literals)}__"
+        literals.append((token, text))
+        return token
+
     for i, (row, image) in enumerate(entries):
         placemark = ET.SubElement(doc, _kml_tag("Placemark"))
         ET.SubElement(placemark, _kml_tag("name")).text = row.get("Name") or ""
-        html = popup_html(row.get("Description") or "", image)
+        photo = kml_image_url(image) if image else None
+        html = popup_html(row.get("Description") or "", photo)
         if html:
             token = f"__BALLOON_{i}__"
             ET.SubElement(placemark, _kml_tag("description")).text = token
             balloons.append((token, html))
         extra = ET.SubElement(placemark, _kml_tag("ExtendedData"))
-        if image:
+        if photo:
             media = ET.SubElement(extra, _kml_tag("Data"), {"name": "gx_media_links"})
-            ET.SubElement(media, _kml_tag("value")).text = image
+            ET.SubElement(media, _kml_tag("value")).text = literal(photo)
         for field in KML_FIELDS:
             value = (row.get(field) or "").strip()
+            if field == "Google Maps URL":
+                value = kml_maps_url(value)
             if not value:
                 continue
             data = ET.SubElement(extra, _kml_tag("Data"), {"name": field})
-            ET.SubElement(data, _kml_tag("value")).text = value
+            ET.SubElement(data, _kml_tag("value")).text = literal(value)
         point = ET.SubElement(placemark, _kml_tag("Point"))
         # KML order is longitude, latitude. The CSV columns are the other way round.
         ET.SubElement(point, _kml_tag("coordinates")).text = f"{row['Longitude']},{row['Latitude']},0"
     ET.indent(document, space="  ")
     body = ET.tostring(document, encoding="unicode", xml_declaration=False)
     for token, html in balloons:
-        cdata = "<![CDATA[" + html.replace("]]>", "]]&gt;") + "]]>"
         body, count = re.subn(
             rf"<description>\s*{re.escape(token)}\s*</description>",
-            f"<description>{cdata}</description>",
+            f"<description>{cdata_wrap(html)}</description>",
             body,
             count=1,
         )
         if count != 1:
             raise RuntimeError(f"could not place the popup HTML for {token}")
+    for token, text in literals:
+        body, count = re.subn(
+            rf"<value>\s*{re.escape(token)}\s*</value>",
+            f"<value>{cdata_wrap(text)}</value>",
+            body,
+            count=1,
+        )
+        if count != 1:
+            raise RuntimeError(f"could not place the field value for {token}")
     return ('<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n").encode("utf-8")
 
 

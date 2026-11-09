@@ -372,6 +372,11 @@ is HTML in a CDATA block: `<img src="URL" height="200" width="auto" />`, then
 also goes in `<ExtendedData><Data name="gx_media_links"><value>URL</value></Data>`.
 The other CSV fields, except Name, Description, Latitude and Longitude, are further
 `Data` entries. Leave out `gx_media_links` when the spot has no working image.
+Write every `<value>` in a CDATA section. A Google Maps link in KML must not
+contain `&`. My Maps rewrites that character into the letters `amp` in the pin
+panel, and the link does not open. Use
+`https://www.google.com/maps/place/?q=place_id:PLACE_ID`. Photo URLs must not
+contain `&` either; drop the query string. The CSV can keep the original URL.
 
 ### The list for the chat
 
