@@ -1,11 +1,11 @@
 # My Maps spots skill
 
 An agent skill that turns a place name into a [Google My Maps](https://www.google.com/maps/d/)
-import file. You give it a place such as `Helsinki`. The agent reads blog posts and
+import. You give it a place such as `Helsinki`. The agent reads blog posts and
 articles by residents and people who actually travelled there, picks the spots they
 recommend, researches each spot's background, verifies every location, and writes
-CSV files you can import as map layers. It also lists the source posts it used, and
-the ones it rejected.
+files you can import as map layers. The KML import shows a photo in each pin popup.
+It also lists the source posts it used, and the ones it rejected.
 
 Each pin has:
 
@@ -21,6 +21,12 @@ Each pin has:
 | Website | Only a confirmed official website |
 | Sources | The blog posts and articles that recommended the spot |
 
+The photo is not a CSV column. Google My Maps shows a CSV value as text, so a link in
+the spreadsheet never becomes the popup picture. The `.kml` files store the photo the
+way My Maps itself stores one: the image address in a field named `gx_media_links`, and
+the same address as an image in the pin's description. Import a KML file to get the
+photos. The CSV files are the same pins and text without the photos.
+
 The agent also shows the spots in the chat, grouped by area (neighbourhood or district,
 in a sensible order), with a photo, description, local terms and numbered source links
 for each spot, followed by the list of sources used and rejected. The layout is made for
@@ -33,13 +39,14 @@ Commons or a source post, and are checked to embed from another site.
 my-maps-spots/
   SKILL.md                     the skill: workflow and rules for the agent
   scripts/verify_places.py     checks coordinates, Google Maps links, websites
-  scripts/build_mymaps_csv.py  writes the My Maps CSVs and the sources list
+  scripts/images.py            checks that a photo can be embedded
+  scripts/build_mymaps_csv.py  writes the My Maps CSV and KML files, and the sources list
   scripts/render_spots.py      checks photos, prints the area-grouped list as Markdown
   examples/helsinki-spots.json sample input with three Helsinki spots
   .env.example                 where to put the optional API key
 ```
 
-All three scripts need only Python 3.9 or newer, with no extra packages. Agents that cannot
+The scripts need only Python 3.9 or newer, with no extra packages. Agents that cannot
 run scripts can follow the manual steps written into `SKILL.md`.
 
 ## Install
@@ -112,11 +119,16 @@ python3 scripts/render_spots.py output/helsinki/verified.json -o output/helsinki
 
 Output in `output/helsinki/`:
 
-- `helsinki-all.csv`: all spots, for a single layer
-- `helsinki-<category>.csv`: one file per category, for one layer each
+- `helsinki-all.kml`: all spots, one layer, with a photo in each pin popup. Import this.
+- `helsinki-<category>.kml`: one file per category, for one layer each, photos included
+- `helsinki-all.csv` and `helsinki-<category>.csv`: the same spots without popup photos
 - `sources.md`, `sources.csv`: every source read, used or rejected, and the spots from it
 - `excluded.csv`: spots that could not be verified, and why
 - `spots.md`: the area-grouped list with photos that the agent posts in the chat
+
+`build_mymaps_csv.py` takes `--no-check-images` and `--timeout` (default 8 seconds),
+the same idea as `render_spots.py`. The map file keeps the direct image address. The
+chat list may rewrite it to a GitHub image-proxy address so it shows in more apps.
 
 Useful options for `verify_places.py`:
 
@@ -145,13 +157,16 @@ The sample's blog URLs are `example.com` placeholders; real runs list the actual
 ## Importing into Google My Maps
 
 1. Open [Google My Maps](https://www.google.com/maps/d/) and click **Create a new map**.
-2. In the first layer, click **Import** and upload a CSV.
-3. Under "Choose columns to position your placemarks", tick **Latitude** and **Longitude**.
-4. Under "Choose a column to title your markers", choose **Name**.
-5. For one layer per category, click **Add layer** and repeat with each category file.
+2. In the first layer, click **Import** and upload a KML file.
+3. For one layer per category, click **Add layer** and repeat with each category KML.
    A map can have up to 10 layers.
 
-Every other column appears in the pin's details, and the URLs are clickable.
+Open a pin to confirm the photo. My Maps sometimes says a column named `gx_media_links`
+was skipped. That is the field that carries the photo; the picture can still be there.
+
+The CSV files import the same text without photos. For a CSV, tick **Latitude** and
+**Longitude** to position the pins, and choose **Name** as the marker title. Every other
+column appears in the pin's details, and the URLs are clickable.
 
 ## Data sources
 

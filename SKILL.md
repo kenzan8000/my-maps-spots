@@ -1,14 +1,15 @@
 ---
 name: my-maps-spots
-description: Build a Google My Maps import (CSV) of spots for a place, sourced from first-hand travel blogs and articles by locals and travellers. Use when the user wants map pins, a travel map, or a My Maps CSV with verified coordinates, descriptions, local names, Google Maps links, official websites, and the source posts. Also shows the spots in the chat grouped by area, each with a photo. The place name may come later; if it is not given, ask for it in the chat.
+description: Build a Google My Maps import of spots for a place, sourced from first-hand travel blogs and articles by locals and travellers. Use when the user wants map pins, a travel map, or a My Maps file with verified coordinates, descriptions, photos in the pin popups, local names, Google Maps links, official websites, and the source posts. Also shows the spots in the chat grouped by area, each with a photo. The place name may come later; if it is not given, ask for it in the chat.
 ---
 
 # My Maps spots from first-hand travel writing
 
-Turn a place name into CSV files that import cleanly into Google My Maps. Every pin
+Turn a place name into files that import cleanly into Google My Maps. Every pin
 comes from real blog posts or articles written by residents or people who actually
 travelled there, carries an accurate location, and lists the posts it came from. The
-same spots are also shown in the chat, grouped by area, each with a photo.
+KML import shows a photo in the pin popup. The same spots are also shown in the chat,
+grouped by area, each with a photo.
 
 The user will follow these pins on the ground. **A missing pin is better than a
 wrong pin. A missing link is better than a guessed link.**
@@ -166,8 +167,12 @@ Do not use Google Maps or Google Places photos. Each URL must:
 - point directly at a JPEG, PNG, WebP or GIF file, not a web page, SVG or AVIF;
 - be a thumbnail-sized file, under about 1.5 MB.
 
-The scripts check this later. A spot with no working image is still listed, without a
-photo, and the script warns about it.
+The scripts check this later. The same check picks the photo for the pin popup: the
+first image that loads, followed through to the image file itself. A Wikimedia
+thumbnail redirect is stored as the matching `upload.wikimedia.org` file. The chat
+list may show that photo through GitHub's image proxy instead, because some chat apps
+only load images from a few hosts. A spot with no working image is still listed,
+without a photo, and the script warns about it.
 
 Only set `website` if you confirmed it is the spot's own official site (linked from
 Wikipedia/Wikidata, the tourism board, or clearly operated by the venue). Set
@@ -323,9 +328,9 @@ For each spot:
    exact place. Use the URL of that result. Otherwise leave it empty.
 4. Use 6 decimal places for coordinates.
 
-## Step 8: Build the CSVs and the area list
+## Step 8: Build the map files and the area list
 
-### The CSVs
+### The map files
 
 ```bash
 python3 scripts/build_mymaps_csv.py output/<slug>/verified.json --out-dir output/<slug>
@@ -333,11 +338,19 @@ python3 scripts/build_mymaps_csv.py output/<slug>/verified.json --out-dir output
 
 This writes:
 
-- `<slug>-all.csv`: every verified spot in one layer.
-- `<slug>-<category>.csv`: one file per category, one My Maps layer each.
+- `<slug>-all.kml`: every verified spot in one layer, with a photo in each pin popup.
+  This is the file to import.
+- `<slug>-<category>.kml`: one file per category, one My Maps layer each, photos included.
+- `<slug>-all.csv` and `<slug>-<category>.csv`: the same spots and text fields, without
+  photos. A CSV import cannot show a photo in the popup.
 - `sources.md` and `sources.csv`: every source opened, used or rejected, and which
   spots came from it.
 - `excluded.csv`: spots left out and why.
+
+The KML stores each photo the way a My Maps export does: the direct image URL in
+`gx_media_links`, and the same URL as an `<img>` in the pin description. My Maps may
+warn that a column was skipped. That warning is about `gx_media_links`; open a pin
+anyway and check that the photo is there.
 
 Manual path: write the same files by hand. The CSV is UTF-8 with a header row and these
 columns, in this order, with standard CSV quoting:
@@ -351,6 +364,14 @@ Name,Local name,Category,Area,Description,Latitude,Longitude,Google Maps URL,Web
   `Local terms: kirkko = church (KEERK-ko); temppeliaukio = temple square`.
 - `Sources`: source URLs separated by single spaces.
 - Empty cells for unknown links. Never fill them with guesses.
+
+For the KML, one `Placemark` per spot. `<name>` is the pin title. `<Point><coordinates>`
+is `longitude,latitude,0` (the opposite order from the CSV columns). The description
+is HTML in a CDATA block: `<img src="URL" height="200" width="auto" />`, then
+`<br><br>`, then the description text with newlines written as `<br>`. The image URL
+also goes in `<ExtendedData><Data name="gx_media_links"><value>URL</value></Data>`.
+The other CSV fields, except Name, Description, Latitude and Longitude, are further
+`Data` entries. Leave out `gx_media_links` when the spot has no working image.
 
 ### The list for the chat
 
@@ -395,7 +416,8 @@ redirect. Then send `{"text": "![](<url>)", "mode": "gfm"}` as a POST to
 
 In the user's language, give:
 
-1. The paths of the CSV files, and which to import (combined file, or one per layer).
+1. The paths of the KML files, and which to import (combined file, or one per layer).
+   Mention the CSV files as the same spots without popup photos.
 2. The spots grouped by area, with photos: post the Markdown from
    `render_spots.py` as it is, in the chat, not only as a file. No table. The layout is
    made for a phone screen:
@@ -428,8 +450,8 @@ In the user's language, give:
    only if the verifier said so.
 6. How to import:
    1. Open [Google My Maps](https://www.google.com/maps/d/) and create a map.
-   2. In a layer, click **Import** and upload a CSV.
-   3. For "Choose columns to position your placemarks", tick **Latitude** and
-      **Longitude**.
-   4. For "Choose a column to title your markers", choose **Name**.
-   5. Repeat with a new layer for each category file, if using per-category files.
+   2. In a layer, click **Import** and upload a KML file (the one with the photos).
+   3. If My Maps says a column was skipped, open a pin and confirm the photo is there.
+   4. Repeat with a new layer for each category file, if using per-category files.
+   5. The CSV files are the same spots without photos. To import one, tick **Latitude**
+      and **Longitude** to position the pins, and choose **Name** as the marker title.

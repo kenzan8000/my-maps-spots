@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""Build Google My Maps import CSVs from verified.json (output of verify_places.py).
+"""Build Google My Maps import files from verified.json (output of verify_places.py).
 
 Writes into --out-dir:
-  <slug>-all.csv           every verified spot, one layer
+  <slug>-all.csv           every verified spot, one layer, text fields only
   <slug>-<category>.csv    one file per category, one layer each
+  <slug>-all.kml           the same spots, with a photo in each pin popup
+  <slug>-<category>.kml    one file per category, photos included
   sources.md, sources.csv  every source read, used or rejected
   excluded.csv             spots left out, with the reason
+
+A CSV import cannot show a photo in the popup. The KML puts the image URL in
+ExtendedData under the name gx_media_links, which is where My Maps stores a
+pin's popup photo. Import the KML to get the photo.
+
 Uses only the Python standard library.
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import io
 import json
@@ -19,7 +27,11 @@ import math
 import re
 import sys
 import unicodedata
+import xml.etree.ElementTree as ET
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from images import resolve_direct_image, warn  # noqa: E402
 
 COLUMNS = [
     "Name",
@@ -37,6 +49,12 @@ MAX_ROWS = 2000
 MAX_BYTES = 5 * 1024 * 1024 - 64 * 1024
 MAX_LAYERS = 10
 DUPLICATE_DISTANCE_M = 30
+# Popup fields other than the writeup. The writeup goes in <description>.
+# Latitude and Longitude are the placemark point, not extra fields.
+# gx_media_links is added separately and is what makes the photo show.
+KML_FIELDS = ["Local name", "Category", "Area", "Google Maps URL", "Website", "Sources"]
+KML_NS = "http://www.opengis.net/kml/2.2"
+ET.register_namespace("", KML_NS)
 
 
 def slugify(text: str) -> str:
@@ -134,6 +152,135 @@ def chunk_rows(rows: list[dict]) -> list[list[dict]]:
     if current:
         chunks.append(current)
     return chunks
+
+
+def spot_key(spot: dict) -> str:
+    return str(spot.get("id") or spot.get("name") or spot.get("local_name") or "")
+
+
+def choose_map_images(spots: list[dict], check: bool, timeout: float) -> dict[str, str | None]:
+    """First photo My Maps can fetch for each spot, at the URL after redirects."""
+
+    def one(spot: dict) -> tuple[str | None, list[tuple[str, str, str]]]:
+        return resolve_direct_image(list(spot.get("images") or []), timeout, check)
+
+    chosen: dict[str, str | None] = {}
+    results: list[str] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        resolved = list(pool.map(one, spots))
+    for spot, (url, failures) in zip(spots, resolved):
+        key = spot_key(spot)
+        chosen[key] = url
+        for failed_url, result, reason in failures:
+            results.append(result)
+            warn(f"{key}: image rejected ({reason}): {failed_url}")
+        if url is None:
+            warn(f"{key}: no working image; add candidates from other sites and rerun")
+    if results and all(result == "unreachable" for result in results) and not any(chosen.values()):
+        warn(
+            "no image could be reached; this environment may have no network access. "
+            "Check the image URLs with your own browsing tool, keep only working ones, "
+            "and rerun with --no-check-images."
+        )
+    return chosen
+
+
+def _kml_tag(name: str) -> str:
+    return f"{{{KML_NS}}}{name}"
+
+
+def html_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def popup_html(description: str, image: str | None) -> str:
+    """Balloon HTML in the shape a My Maps photo export uses.
+
+    A pin with a photo and a note exports as an <img> (height 200, width auto),
+    a blank line, then the note with newlines turned into <br>.
+    """
+    parts = []
+    if image:
+        parts.append(f'<img src="{html_escape(image)}" height="200" width="auto" />')
+    text = description.strip()
+    if text:
+        parts.append("<br>".join(html_escape(line) for line in text.split("\n")))
+    return "<br><br>".join(parts)
+
+
+def kml_bytes(title: str, entries: list[tuple[dict, str | None]]) -> bytes:
+    """KML document. Point coordinates are longitude,latitude, as KML requires.
+
+    The popup photo is stored the way My Maps stores one: the image URL in
+    ExtendedData named gx_media_links, and the same URL as an <img> in the
+    description. A CSV column cannot do this. Import this file, not the CSV,
+    to get the photo.
+    """
+    document = ET.Element(_kml_tag("kml"))
+    doc = ET.SubElement(document, _kml_tag("Document"))
+    ET.SubElement(doc, _kml_tag("name")).text = title
+    balloons: list[tuple[str, str]] = []
+    for i, (row, image) in enumerate(entries):
+        placemark = ET.SubElement(doc, _kml_tag("Placemark"))
+        ET.SubElement(placemark, _kml_tag("name")).text = row.get("Name") or ""
+        html = popup_html(row.get("Description") or "", image)
+        if html:
+            token = f"__BALLOON_{i}__"
+            ET.SubElement(placemark, _kml_tag("description")).text = token
+            balloons.append((token, html))
+        extra = ET.SubElement(placemark, _kml_tag("ExtendedData"))
+        if image:
+            media = ET.SubElement(extra, _kml_tag("Data"), {"name": "gx_media_links"})
+            ET.SubElement(media, _kml_tag("value")).text = image
+        for field in KML_FIELDS:
+            value = (row.get(field) or "").strip()
+            if not value:
+                continue
+            data = ET.SubElement(extra, _kml_tag("Data"), {"name": field})
+            ET.SubElement(data, _kml_tag("value")).text = value
+        point = ET.SubElement(placemark, _kml_tag("Point"))
+        # KML order is longitude, latitude. The CSV columns are the other way round.
+        ET.SubElement(point, _kml_tag("coordinates")).text = f"{row['Longitude']},{row['Latitude']},0"
+    ET.indent(document, space="  ")
+    body = ET.tostring(document, encoding="unicode", xml_declaration=False)
+    for token, html in balloons:
+        cdata = "<![CDATA[" + html.replace("]]>", "]]&gt;") + "]]>"
+        body, count = re.subn(
+            rf"<description>\s*{re.escape(token)}\s*</description>",
+            f"<description>{cdata}</description>",
+            body,
+            count=1,
+        )
+        if count != 1:
+            raise RuntimeError(f"could not place the popup HTML for {token}")
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n").encode("utf-8")
+
+
+def chunk_entries(title: str, entries: list[tuple[dict, str | None]]) -> list[list[tuple[dict, str | None]]]:
+    chunks: list[list[tuple[dict, str | None]]] = []
+    current: list[tuple[dict, str | None]] = []
+    for entry in entries:
+        trial = current + [entry]
+        oversize = current and (len(trial) > MAX_ROWS or len(kml_bytes(title, trial)) > MAX_BYTES)
+        if oversize:
+            chunks.append(current)
+            current = [entry]
+        else:
+            current = trial
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def write_kml_layer(out_dir: Path, stem: str, title: str, entries: list[tuple[dict, str | None]]) -> list[Path]:
+    chunks = chunk_entries(title, entries)
+    paths = []
+    for i, chunk in enumerate(chunks, 1):
+        name = f"{stem}.kml" if len(chunks) == 1 else f"{stem}-part{i}.kml"
+        path = out_dir / name
+        path.write_bytes(kml_bytes(title if len(chunks) == 1 else f"{title} ({i})", chunk))
+        paths.append(path)
+    return paths
 
 
 def write_layer(out_dir: Path, stem: str, rows: list[dict]) -> list[Path]:
@@ -263,6 +410,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("verified", type=Path, help="path to verified.json")
     parser.add_argument("--out-dir", type=Path, help="output folder (default: next to verified.json)")
+    parser.add_argument(
+        "--no-check-images",
+        action="store_true",
+        help="use the first https image URL without checking it (My Maps still needs a direct image file)",
+    )
+    parser.add_argument("--timeout", type=float, default=8.0, help="seconds per image request (default 8)")
     args = parser.parse_args()
 
     data = json.loads(args.verified.read_text(encoding="utf-8"))
@@ -278,18 +431,25 @@ def main() -> int:
 
     included, excluded = select_spots(all_spots)
 
-    for old in out_dir.glob(f"{slug}-*.csv"):
-        old.unlink()
+    for pattern in (f"{slug}-*.csv", f"{slug}-*.kml"):
+        for old in out_dir.glob(pattern):
+            old.unlink()
 
     area_names = area_name_map(place)
-    rows = [spot_row(s, area_names) for s in included]
+    images = choose_map_images(included, not args.no_check_images, args.timeout)
+    entries = [(spot_row(s, area_names), images.get(spot_key(s))) for s in included]
+    rows = [row for row, _image in entries]
+    place_title = place.get("query") or slug
     written = write_layer(out_dir, f"{slug}-all", rows)
+    written += write_kml_layer(out_dir, f"{slug}-all", place_title, entries)
 
-    categories: dict[str, list[dict]] = {}
-    for row in rows:
-        categories.setdefault(row["Category"], []).append(row)
-    for category, cat_rows in categories.items():
-        written += write_layer(out_dir, f"{slug}-{slugify(category)}", cat_rows)
+    categories: dict[str, list[tuple[dict, str | None]]] = {}
+    for entry in entries:
+        categories.setdefault(entry[0]["Category"], []).append(entry)
+    for category, cat_entries in categories.items():
+        stem = f"{slug}-{slugify(category)}"
+        written += write_layer(out_dir, stem, [row for row, _image in cat_entries])
+        written += write_kml_layer(out_dir, stem, category, cat_entries)
 
     excluded_columns = ["Name", "Local name", "Category", "Reason", "Matched name", "Sources"]
     excluded_rows = [
@@ -309,7 +469,11 @@ def main() -> int:
     sources = collect_sources(data, spots_by_id)
     write_sources(out_dir, place.get("query") or slug, sources, included)
 
-    print(f"{len(included)} spots included, {len(excluded)} excluded", file=sys.stderr)
+    with_photo = sum(1 for _row, image in entries if image)
+    print(
+        f"{len(included)} spots included, {len(excluded)} excluded, {with_photo} with a popup photo",
+        file=sys.stderr,
+    )
     if len(categories) > MAX_LAYERS:
         print(
             f"warning: {len(categories)} categories but My Maps allows {MAX_LAYERS} layers per map; "
