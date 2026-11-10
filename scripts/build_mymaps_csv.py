@@ -9,9 +9,9 @@ Writes into --out-dir:
   sources.md, sources.csv  every source read, used or rejected
   excluded.csv             spots left out, with the reason
 
-A CSV import cannot show a photo in the popup. The KML puts the image URL in
+A CSV import cannot show a photo or a pin icon. The KML puts the image URL in
 ExtendedData under the name gx_media_links, which is where My Maps stores a
-pin's popup photo. Import the KML to get the photo.
+pin's popup photo, and sets each pin's icon. Import the KML.
 
 Uses only the Python standard library.
 """
@@ -30,9 +30,11 @@ import unicodedata
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from images import resolve_direct_image, warn  # noqa: E402
+from pins import BLANK_ICON_HREF, kml_color, pin_style, style_id  # noqa: E402
 
 COLUMNS = [
     "Name",
@@ -54,6 +56,8 @@ DUPLICATE_DISTANCE_M = 30
 # Latitude and Longitude are the placemark point, not extra fields.
 # gx_media_links is added separately and is what makes the photo show.
 KML_FIELDS = ["Local name", "Category", "Area", "Google Maps URL", "Website", "Sources"]
+# A map row, its popup photo, and the pin icon from pins.pin_style.
+MapEntry = Tuple[dict, Optional[str], dict]
 KML_NS = "http://www.opengis.net/kml/2.2"
 ET.register_namespace("", KML_NS)
 
@@ -250,17 +254,39 @@ def popup_html(description: str, image: str | None) -> str:
     return "<br><br>".join(parts)
 
 
-def kml_bytes(title: str, entries: list[tuple[dict, str | None]]) -> bytes:
+def _add_pin_style(doc: ET.Element, icon_id: int, color: str) -> str:
+    """Shared style. My Maps reads the icon and the color from the style id."""
+    sid = style_id(icon_id, color)
+    style = ET.SubElement(doc, _kml_tag("Style"), {"id": sid})
+    icon_style = ET.SubElement(style, _kml_tag("IconStyle"))
+    ET.SubElement(icon_style, _kml_tag("color")).text = kml_color(color)
+    ET.SubElement(icon_style, _kml_tag("scale")).text = "1"
+    icon = ET.SubElement(icon_style, _kml_tag("Icon"))
+    ET.SubElement(icon, _kml_tag("href")).text = BLANK_ICON_HREF
+    return sid
+
+
+def kml_bytes(title: str, entries: list[MapEntry]) -> bytes:
     """KML document. Point coordinates are longitude,latitude, as KML requires.
 
     The popup photo is stored the way My Maps stores one: the image URL in
     ExtendedData named gx_media_links, and the same URL as an <img> in the
     description. A CSV column cannot do this. Import this file, not the CSV,
     to get the photo.
+
+    Each pin's style id is icon-<id>-0288D1. My Maps uses that id for the icon.
+    The color is the same on every pin. Icon 1899 is the normal pin.
     """
     document = ET.Element(_kml_tag("kml"))
     doc = ET.SubElement(document, _kml_tag("Document"))
     ET.SubElement(doc, _kml_tag("name")).text = title
+    seen_styles: set[tuple[int, str]] = set()
+    for _row, _image, pin in entries:
+        key = (int(pin["icon_id"]), str(pin["color"]))
+        if key in seen_styles:
+            continue
+        seen_styles.add(key)
+        _add_pin_style(doc, key[0], key[1])
     balloons: list[tuple[str, str]] = []
     # ElementTree writes & as &amp;. My Maps then shows that in the link and it
     # will not open, so URL fields are filled in as CDATA after serialization.
@@ -271,9 +297,10 @@ def kml_bytes(title: str, entries: list[tuple[dict, str | None]]) -> bytes:
         literals.append((token, text))
         return token
 
-    for i, (row, image) in enumerate(entries):
+    for i, (row, image, pin) in enumerate(entries):
         placemark = ET.SubElement(doc, _kml_tag("Placemark"))
         ET.SubElement(placemark, _kml_tag("name")).text = row.get("Name") or ""
+        ET.SubElement(placemark, _kml_tag("styleUrl")).text = "#" + style_id(int(pin["icon_id"]), str(pin["color"]))
         photo = kml_image_url(image) if image else None
         html = popup_html(row.get("Description") or "", photo)
         if html:
@@ -318,9 +345,9 @@ def kml_bytes(title: str, entries: list[tuple[dict, str | None]]) -> bytes:
     return ('<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n").encode("utf-8")
 
 
-def chunk_entries(title: str, entries: list[tuple[dict, str | None]]) -> list[list[tuple[dict, str | None]]]:
-    chunks: list[list[tuple[dict, str | None]]] = []
-    current: list[tuple[dict, str | None]] = []
+def chunk_entries(title: str, entries: list[MapEntry]) -> list[list[MapEntry]]:
+    chunks: list[list[MapEntry]] = []
+    current: list[MapEntry] = []
     for entry in entries:
         trial = current + [entry]
         oversize = current and (len(trial) > MAX_ROWS or len(kml_bytes(title, trial)) > MAX_BYTES)
@@ -334,7 +361,7 @@ def chunk_entries(title: str, entries: list[tuple[dict, str | None]]) -> list[li
     return chunks
 
 
-def write_kml_layer(out_dir: Path, stem: str, title: str, entries: list[tuple[dict, str | None]]) -> list[Path]:
+def write_kml_layer(out_dir: Path, stem: str, title: str, entries: list[MapEntry]) -> list[Path]:
     chunks = chunk_entries(title, entries)
     paths = []
     for i, chunk in enumerate(chunks, 1):
@@ -499,18 +526,18 @@ def main() -> int:
 
     area_names = area_name_map(place)
     images = choose_map_images(included, not args.no_check_images, args.timeout)
-    entries = [(spot_row(s, area_names), images.get(spot_key(s))) for s in included]
-    rows = [row for row, _image in entries]
+    entries = [(spot_row(s, area_names), images.get(spot_key(s)), pin_style(s)) for s in included]
+    rows = [row for row, _image, _pin in entries]
     place_title = place.get("query") or slug
     written = write_layer(out_dir, f"{slug}-all", rows)
     written += write_kml_layer(out_dir, f"{slug}-all", place_title, entries)
 
-    categories: dict[str, list[tuple[dict, str | None]]] = {}
+    categories: dict[str, list[MapEntry]] = {}
     for entry in entries:
         categories.setdefault(entry[0]["Category"], []).append(entry)
     for category, cat_entries in categories.items():
         stem = f"{slug}-{slugify(category)}"
-        written += write_layer(out_dir, stem, [row for row, _image in cat_entries])
+        written += write_layer(out_dir, stem, [row for row, _image, _pin in cat_entries])
         written += write_kml_layer(out_dir, stem, category, cat_entries)
 
     excluded_columns = ["Name", "Local name", "Category", "Reason", "Matched name", "Sources"]
@@ -531,9 +558,11 @@ def main() -> int:
     sources = collect_sources(data, spots_by_id)
     write_sources(out_dir, place.get("query") or slug, sources, included)
 
-    with_photo = sum(1 for _row, image in entries if image)
+    with_photo = sum(1 for _row, image, _pin in entries if image)
+    with_icon = sum(1 for _row, _image, pin in entries if pin["icon_key"] != "pin")
     print(
-        f"{len(included)} spots included, {len(excluded)} excluded, {with_photo} with a popup photo",
+        f"{len(included)} spots included, {len(excluded)} excluded, {with_photo} with a popup photo, "
+        f"{with_icon} with a matching icon",
         file=sys.stderr,
     )
     if len(categories) > MAX_LAYERS:

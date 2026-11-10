@@ -4,7 +4,8 @@ An agent skill that turns a place name into a [Google My Maps](https://www.googl
 import. You give it a place such as `Helsinki`. The agent reads blog posts and
 articles by residents and people who actually travelled there, picks the spots they
 recommend, researches each spot's background, verifies every location, and writes
-files you can import as map layers. The KML import shows a photo in each pin popup.
+files you can import as map layers. The KML import shows a photo in each pin popup
+and picks an icon for the kind of place.
 It also lists the source posts it used, and the ones it rejected.
 
 Each pin has:
@@ -25,13 +26,15 @@ The photo is not a CSV column. Google My Maps shows a CSV value as text, so a li
 the spreadsheet never becomes the popup picture. The `.kml` files store the photo the
 way My Maps itself stores one: the image address in a field named `gx_media_links`, and
 the same address as an image in the pin's description. Import a KML file to get the
-photos. The CSV files are the same pins and text without the photos.
+photo and the icon. A restaurant uses the restaurant icon; a spot with no matching
+icon keeps the normal pin. The CSV files are the same pins and text without the
+photos or icons.
 
-The agent also shows the spots in the chat, grouped by area (neighbourhood or district,
-in a sensible order), with a photo, description, local terms and numbered source links
-for each spot, followed by the list of sources used and rejected. The layout is made for
-a phone screen, with no wide tables. Photos come from the spot's official site, Wikimedia
-Commons or a source post, and are checked to embed from another site.
+The full list is `spots.md`: spots grouped by area, each with a photo, description,
+local terms and numbered source links, then the sources used and rejected. The chat
+gets the file path and a short index of area and spot names. Photos come from the
+spot's official site, Wikimedia Commons or a source post, and are checked to embed
+from another site.
 
 ## What's in here
 
@@ -41,6 +44,7 @@ my-maps-spots/
   scripts/verify_places.py     checks coordinates, Google Maps links, websites
   scripts/images.py            checks that a photo can be embedded
   scripts/build_mymaps_csv.py  writes the My Maps CSV and KML files, and the sources list
+  scripts/pins.py              chooses each pin's icon
   scripts/render_spots.py      checks photos, prints the area-grouped list as Markdown
   examples/helsinki-spots.json sample input with three Helsinki spots
   .env.example                 where to put the optional API key

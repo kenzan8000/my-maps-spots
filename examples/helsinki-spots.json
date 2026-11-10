@@ -32,6 +32,7 @@
       "name": "Suomenlinna (Sveaborg / Fortress of Finland)",
       "local_name": "Suomenlinna",
       "category": "Sights",
+      "icon": "historic",
       "area": "islands",
       "description": "An 18th-century sea fortress built across six islands at the mouth of Helsinki's harbour, begun under Swedish rule in 1748 and a UNESCO World Heritage Site since 1991. Around 800 people still live there year-round. Bloggers suggest taking the regular public HSL ferry from Market Square and packing a picnic for the southern ramparts.",
       "local_terms": [
@@ -70,6 +71,7 @@
       "name": "Temppeliaukion kirkko (Rock Church)",
       "local_name": "Temppeliaukion kirkko",
       "category": "Sights",
+      "icon": "church",
       "area": "toolo",
       "description": "A Lutheran church carved directly into solid granite, completed in 1969 by architects Timo and Tuomo Suomalainen. A copper dome and a ring of skylights let daylight in along the rock walls. Bloggers recommend going early to avoid tour groups and checking for concerts, as the acoustics are excellent.",
       "local_terms": [

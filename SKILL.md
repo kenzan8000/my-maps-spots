@@ -1,6 +1,6 @@
 ---
 name: my-maps-spots
-description: Build a Google My Maps import of spots for a place, sourced from first-hand travel blogs and articles by locals and travellers. Use when the user wants map pins, a travel map, or a My Maps file with verified coordinates, descriptions, photos in the pin popups, local names, Google Maps links, official websites, and the source posts. Also shows the spots in the chat grouped by area, each with a photo. The place name may come later; if it is not given, ask for it in the chat.
+description: Build a Google My Maps import of spots for a place, sourced from first-hand travel blogs and articles by locals and travellers. Use when the user wants map pins, a travel map, or a My Maps file with verified coordinates, descriptions, photos in the pin popups, local names, Google Maps links, official websites, and the source posts. The full spot list, with photos, goes in spots.md. The chat only gets a short index of areas and names. The place name may come later; if it is not given, ask for it in the chat.
 ---
 
 # My Maps spots from first-hand travel writing
@@ -8,8 +8,9 @@ description: Build a Google My Maps import of spots for a place, sourced from fi
 Turn a place name into files that import cleanly into Google My Maps. Every pin
 comes from real blog posts or articles written by residents or people who actually
 travelled there, carries an accurate location, and lists the posts it came from. The
-KML import shows a photo in the pin popup. The same spots are also shown in the chat,
-grouped by area, each with a photo.
+KML import shows a photo in the pin popup. The same spots are written to
+`spots.md`, grouped by area, each with a photo. The chat gets a short index of
+that file, not a second copy of the cards.
 
 The user will follow these pins on the ground. **A missing pin is better than a
 wrong pin. A missing link is better than a guessed link.**
@@ -107,6 +108,14 @@ For each spot a source recommends, record:
 - `category`: a short layer name in the user's language (Sights, Food & Drink, Nature,
   Museums, Shopping, Nightlife, ...). Keep the total to 10 or fewer, since My Maps
   allows 10 layers per map.
+- `icon`: the closest My Maps icon, as one of these keys: `restaurant`, `cafe`,
+  `bar`, `drinks`, `fast_food`, `pizza`, `grocery`, `shopping`, `hotel`, `museum`,
+  `church`, `monument`, `historic`, `viewpoint`, `beach`, `waterfall`, `hiking`,
+  `park`, `camping`, `ferry`, `tram`, `train`, `bus`, `airport`, `cinema`,
+  `theater`, `music`, `playground`, `pool`, `university`, `civic`, `amusement`,
+  `info`. Pick from what the spot is, not from the category name alone (a church
+  in Sights is `church`). If none of these fits, leave `icon` out. The pin then
+  stays the normal My Maps pin.
 - `area`: the neighbourhood, district or zone of the place where the spot lies (for
   example Kallio, Töölö, "Islands in the harbour"). Use the names the sources and
   Wikipedia use. Step 6 turns these into the list of areas.
@@ -203,6 +212,7 @@ Create a working folder `output/<place-slug>/` and write `spots.json`:
       "name": "Temppeliaukion kirkko (Rock Church)",
       "local_name": "Temppeliaukion kirkko",
       "category": "Sights",
+      "icon": "church",
       "area": "toolo",
       "description": "A Lutheran church carved directly into solid granite, completed in 1969 by architects Timo and Tuomo Suomalainen. A copper dome and a ring of skylights let daylight in along the rock walls. Bloggers recommend going early to avoid tour groups and checking for concerts, as the acoustics are excellent.",
       "local_terms": [
@@ -338,9 +348,10 @@ python3 scripts/build_mymaps_csv.py output/<slug>/verified.json --out-dir output
 
 This writes:
 
-- `<slug>-all.kml`: every verified spot in one layer, with a photo in each pin popup.
-  This is the file to import.
-- `<slug>-<category>.kml`: one file per category, one My Maps layer each, photos included.
+- `<slug>-all.kml`: every verified spot in one layer, with a photo in each pin popup
+  and a pin icon for the kind of place. This is the file to import.
+- `<slug>-<category>.kml`: one file per category, one My Maps layer each, with the
+  same photos and icons.
 - `<slug>-all.csv` and `<slug>-<category>.csv`: the same spots and text fields, without
   photos. A CSV import cannot show a photo in the popup.
 - `sources.md` and `sources.csv`: every source opened, used or rejected, and which
@@ -378,13 +389,22 @@ panel, and the link does not open. Use
 `https://www.google.com/maps/place/?q=place_id:PLACE_ID`. Photo URLs must not
 contain `&` either; drop the query string. The CSV can keep the original URL.
 
-### The list for the chat
+Give every placemark a `styleUrl` of `#icon-<id>-0288D1`. My Maps reads the icon
+from that id. Use icon `1899` for the normal pin, and the same blue, `0288D1`,
+on every pin, because the id needs a color for the icon to show. Add a shared
+`<Style>` with that id, an `<IconStyle><color>` of
+`ffd18802` (KML order `aabbggrr`), and an `<Icon><href>` of
+`https://www.gstatic.com/mapspro/images/stock/503-wht-blank_maps.png`. The href
+stays that blank pin; the style id is what My Maps draws.
+
+### The spot list
 
 ```bash
 python3 scripts/render_spots.py output/<slug>/verified.json -o output/<slug>/spots.md
 ```
 
-It prints (or writes) Markdown for the chat, for the same spots as in the CSVs:
+It writes `spots.md`, for the same spots as in the CSVs. That file is the full list.
+Step 9 puts only a short index in the chat.
 
 - one section per area, in the order of `place.areas`, with the area's summary. Inside
   an area, the spots with the most sources come first;
@@ -414,7 +434,8 @@ Without scripts (manual path): for each spot, open each image URL and keep the f
 that shows the right place and follows the rules in Step 5. Use the final URL after any
 redirect. Then send `{"text": "![](<url>)", "mode": "gfm"}` as a POST to
 `https://api.github.com/markdown` and use the `camo.githubusercontent.com` URL from the
-`<img src="...">` it returns. Write the Markdown in the layout shown in Step 9. Escape
+`<img src="...">` it returns. Write `spots.md` with one section per area and one card
+per spot, as the script does. Escape
 `(`, `)` and spaces in URLs as `%28`, `%29` and `%20` so links and images render.
 
 ## Step 9: Report to the user
@@ -423,39 +444,29 @@ In the user's language, give:
 
 1. The paths of the KML files, and which to import (combined file, or one per layer).
    Mention the CSV files as the same spots without popup photos.
-2. The spots grouped by area, with photos: post the Markdown from
-   `render_spots.py` as it is, in the chat, not only as a file. No table. The layout is
-   made for a phone screen:
+2. Where the full list is: the path of `spots.md`. That file has every area, photo,
+   description, address, local terms and source link. Do not paste it into the chat,
+   and do not rewrite its cards. Pasting it makes the reply repeat the same area and
+   spot, because the file is long and every card has the same shape.
+3. A short index, each area and each spot once. Area name, then the spot names under
+   it. No photos, no descriptions, no links:
 
    ```markdown
-   ## Töölö (Töölö)
-
-   *A leafy residential district just north-west of the centre.*
-
-   ### Temppeliaukion kirkko (Rock Church)
-
-   ![Temppeliaukion kirkko (Rock Church)](https://...)
-
-   *Sights* · [Google Maps](https://...) · [Website](https://...)
-
-   A Lutheran church carved directly into solid granite, ...
-
-   - **Address:** Lutherinkatu 3, 00100 Helsinki
-   - **Local terms:** *kirkko* = church (KEERK-ko)
-   - **Sources:** [2](https://...)
+   South of the Pegnitz: St. Lorenz, Germanisches Nationalmuseum, Handwerkerhof
    ```
 
-3. The source list: title, author, date and link for each used source, then the
-   rejected ones with reasons. It comes right after the spots, under the heading
-   "Sources used", and is part of the same Markdown. Show it in the chat, not only in
-   the file.
-4. Excluded spots and why they were left out.
-5. How the locations were verified: Google mode or open data mode, exactly as the
+4. The source list stays in `spots.md`, under "Sources used" and "Rejected sources".
+   In the chat, give the counts only: how many sources were used and how many were
+   rejected.
+5. Excluded spots and why they were left out.
+6. How the locations were verified: Google mode or open data mode, exactly as the
    verifier reported (`verification.mode` in `verified.json`). Say the key is missing
    only if the verifier said so.
-6. How to import:
+7. How to import:
    1. Open [Google My Maps](https://www.google.com/maps/d/) and create a map.
    2. In a layer, click **Import** and upload a KML file (the one with the photos).
+      The pin icon is already in that file. A spot with no matching icon keeps
+      the normal pin.
    3. If My Maps says a column was skipped, open a pin and confirm the photo is there.
    4. Repeat with a new layer for each category file, if using per-category files.
    5. The CSV files are the same spots without photos. To import one, tick **Latitude**
